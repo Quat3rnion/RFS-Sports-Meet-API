@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify
-from tinydb import TinyDB, where
+from tinydb import TinyDB, where, Query
 import os
 from PIL import Image, ImageEnhance
 from uuid import uuid4
@@ -8,8 +8,9 @@ from werkzeug.utils import secure_filename
 
 HOME_DIR = os.path.dirname(os.path.realpath(__file__))
 UPLOAD_FOLDER = HOME_DIR + '/photos/uploads'
+TECH_FOLDER = HOME_DIR + '/photos/tech'
 FIVEK_CKPT_PATH = HOME_DIR + '/maxim_ckpt.npz'
-HOSTNAME = 'https://api.rfs-sports.kush.in'
+HOSTNAME = 'http://localhost:5000'
 basewidth = 1920
 compressed_dir = HOME_DIR + '/photos/compressed/'
 enhanced_dir = HOME_DIR + '/photos/enhanced/'
@@ -75,6 +76,8 @@ def create_edited_photos(filepath, event, quality=90):
     db.insert({
         "name": newfilename,
         "event": event,
+        "tech_review": "pending",
+        "caption": "pending",
         'original': HOSTNAME + '/photos/original/' + newfilename,
         'enhanced': HOSTNAME + '/photos/enhanced/' + newfilename,
         'enhanced_and_compressed': HOSTNAME + '/photos/enhanced_and_compressed/' + newfilename,
@@ -84,26 +87,24 @@ def create_edited_photos(filepath, event, quality=90):
 
 @app.route('/upload', methods=['POST'])
 def upload():
-    if request.method == 'POST':
-        if request.method == 'POST':
-            event = request.form.get('event')
-            if not event:
-                return jsonify({'status': 'error', 'message': 'No event provided'})
-            for file in request.files:
-                file = request.files[file]
-            if not file:
-                return jsonify({'status': 'error', 'message': 'No file part'})
-            if file.filename == '':
-                return jsonify({'status': 'error', 'message': 'No file selected for uploading'})
-            if file and allowed_image_file(file.filename):
-                filename = secure_filename(file.filename)
-                file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
-                create_edited_photos(os.path.join(
-                    app.config['UPLOAD_FOLDER'], filename), event)
-                os.remove(os.path.join(app.config['UPLOAD_FOLDER'], filename))
-                return jsonify({'status': 'success', 'message': 'File successfully uploaded'})
-            else:
-                return jsonify({'status': 'error', 'message': 'Allowed file types are png, jpg, jpeg, webp'})
+    event = request.form.get('event')
+    if not event:
+        return jsonify({'status': 'error', 'message': 'No event provided'})
+    for file in request.files:
+        file = request.files[file]
+    if not file:
+        return jsonify({'status': 'error', 'message': 'No file part'})
+    if file.filename == '':
+        return jsonify({'status': 'error', 'message': 'No file selected for uploading'})
+    if file and allowed_image_file(file.filename):
+        filename = secure_filename(file.filename)
+        file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+        create_edited_photos(os.path.join(
+            app.config['UPLOAD_FOLDER'], filename), event)
+        os.remove(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+        return jsonify({'status': 'success', 'message': 'File successfully uploaded'})
+    else:
+        return jsonify({'status': 'error', 'message': 'Allowed file types are png, jpg, jpeg, webp'})
 
 
 @app.after_request
@@ -133,6 +134,65 @@ def delete():
             return jsonify({'status': 'success', 'message': 'File successfully deleted'})
         else:
             return jsonify({'status': 'error', 'message': 'No file name provided'})
+
+
+@ app.route('/pending_tech', methods=['GET'])
+def pending_tech():
+    return jsonify(db.search(where('tech_review') == 'pending'))
+
+
+@ app.route('/pending_caption', methods=['GET'])
+def pending_caption():
+    p = Query()
+    return jsonify(db.search((p.caption == 'pending') & (p.tech_review != 'pending')))
+
+
+@ app.route('/update_tech', methods=['POST'])
+def update_tech():
+    name = request.form.get('name')
+    option = request.form.get('option')
+    allowed_options = {
+        'enhanced': HOSTNAME + '/photos/enhanced/' + name,
+        'enhanced_and_compressed': HOSTNAME + '/photos/enhanced_and_compressed/' + name,
+        'compressed': HOSTNAME + '/photos/compressed/' + name,
+        'original': HOSTNAME + '/photos/original/' + name
+    }
+    file = None
+    if not name:
+        return jsonify({'status': 'error', 'message': 'No file name provided'})
+    for file in request.files:
+        file = request.files[file]
+    if file and file.filename == '':
+        return jsonify({'status': 'error', 'message': 'No file selected for uploading'})
+    if file and allowed_image_file(file.filename):
+        filename = secure_filename(file.filename)
+        file.save(os.path.join(TECH_FOLDER, filename))
+        db.update({'tech_review': HOSTNAME + '/photos/tech/' +
+                  filename}, where('name') == name)
+        return jsonify({'status': 'success', 'message': 'File successfully uploaded'})
+    elif option in allowed_options.keys():
+        db.update(
+            {'tech_review': allowed_options[option]}, where('name') == name)
+        return jsonify({'status': 'success', 'message': 'File successfully updated'})
+    else:
+        return jsonify({'status': 'error', 'message': 'Allowed file types are png, jpg, jpeg, webp'})
+
+
+@ app.route('/update_caption', methods=['POST'])
+def update_caption():
+    name = request.form.get('name')
+    caption = request.form.get('caption')
+    if not name:
+        return jsonify({'status': 'error', 'message': 'No file name provided'})
+    if not caption:
+        return jsonify({'status': 'error', 'message': 'No caption provided'})
+    db.update({'caption': caption}, where('name') == name)
+    return jsonify({'status': 'success', 'message': 'Caption successfully updated'})
+
+
+@ app.route('/output', methods=['GET'])
+def output():
+    return jsonify(db.search((where('caption') != 'pending') & (where('tech_review') != 'pending')))
 
 
 if __name__ == "__main__":
