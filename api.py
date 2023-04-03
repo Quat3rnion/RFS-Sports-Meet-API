@@ -9,7 +9,7 @@ from werkzeug.utils import secure_filename
 HOME_DIR = os.path.dirname(os.path.realpath(__file__))
 UPLOAD_FOLDER = HOME_DIR + '/photos/uploads'
 FIVEK_CKPT_PATH = HOME_DIR + '/maxim_ckpt.npz'
-HOSTNAME = 'http://localhost:5000'
+HOSTNAME = 'https://api.rfs-sports.kush.in'
 basewidth = 1920
 compressed_dir = HOME_DIR + '/photos/compressed/'
 enhanced_dir = HOME_DIR + '/photos/enhanced/'
@@ -23,7 +23,6 @@ app = Flask(__name__, static_url_path='/photos',
             static_folder=HOME_DIR + '/photos')
 app.secret_key = "secret key"
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
 IMAGE_ALLOWED_EXTENSIONS = set(['png', 'jpg', 'jpeg', 'webp'])
 
@@ -36,9 +35,9 @@ def compress(picture):
     print('Compressing...')
     wpercent = (basewidth/float(picture.size[0]))
     hsize = int((float(picture.size[1])*float(wpercent)))
-    # resize the image
+    # resize the image 
     picture = picture.resize((basewidth, hsize),
-                             Image.LANCZOS)
+                             Image.Resampling.LANCZOS)
     return picture
 
 
@@ -53,9 +52,10 @@ def enhance(picture):
     return picture
 
 
-def create_edited_photos(filepath, quality=90):
+def create_edited_photos(filepath, event, quality=90):
     print(filepath)
     original = Image.open(filepath)
+    original = original.convert("RGB")
     enhanced = enhance(original)
     compressed = compress(original)
     enhance_and_compress = compress(enhanced)
@@ -74,6 +74,7 @@ def create_edited_photos(filepath, quality=90):
                   "JPEG", optimize=True, quality=quality)
     db.insert({
         "name": newfilename,
+        "event": event,
         'original': HOSTNAME + '/photos/original/' + newfilename,
         'enhanced': HOSTNAME + '/photos/enhanced/' + newfilename,
         'enhanced_and_compressed': HOSTNAME + '/photos/enhanced_and_compressed/' + newfilename,
@@ -84,21 +85,34 @@ def create_edited_photos(filepath, quality=90):
 @app.route('/upload', methods=['POST'])
 def upload():
     if request.method == 'POST':
-        for file in request.files:
-            file = request.files[file]
-        if not file:
-            return jsonify({'status': 'error', 'message': 'No file part'})
-        if file.filename == '':
-            return jsonify({'status': 'error', 'message': 'No file selected for uploading'})
-        if file and allowed_image_file(file.filename):
-            filename = secure_filename(file.filename)
-            file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
-            create_edited_photos(os.path.join(
-                app.config['UPLOAD_FOLDER'], filename))
-            os.remove(os.path.join(app.config['UPLOAD_FOLDER'], filename))
-            return jsonify({'status': 'success', 'message': 'File successfully uploaded'})
-        else:
-            return jsonify({'status': 'error', 'message': 'Allowed file types are png, jpg, jpeg, webp'})
+        if request.method == 'POST':
+            event = request.form.get('event')
+            if not event:
+                return jsonify({'status': 'error', 'message': 'No event provided'})
+            for file in request.files:
+                file = request.files[file]
+            if not file:
+                return jsonify({'status': 'error', 'message': 'No file part'})
+            if file.filename == '':
+                return jsonify({'status': 'error', 'message': 'No file selected for uploading'})
+            if file and allowed_image_file(file.filename):
+                filename = secure_filename(file.filename)
+                file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+                create_edited_photos(os.path.join(
+                    app.config['UPLOAD_FOLDER'], filename), event)
+                os.remove(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+                return jsonify({'status': 'success', 'message': 'File successfully uploaded'})
+            else:
+                return jsonify({'status': 'error', 'message': 'Allowed file types are png, jpg, jpeg, webp'})
+
+
+@app.after_request
+def handle_options(response):
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-Requested-With"
+
+    return response
 
 
 @ app.route('/getall', methods=['GET'])
