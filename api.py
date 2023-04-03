@@ -53,7 +53,7 @@ def enhance(picture):
     return picture
 
 
-def create_edited_photos(filepath, quality=90):
+def create_edited_photos(filepath, event, quality=90):
     print(filepath)
     original = Image.open(filepath)
     enhanced = enhance(original)
@@ -74,6 +74,7 @@ def create_edited_photos(filepath, quality=90):
                   "JPEG", optimize=True, quality=quality)
     db.insert({
         "name": newfilename,
+        "event": event,
         'original': HOSTNAME + '/photos/original/' + newfilename,
         'enhanced': HOSTNAME + '/photos/enhanced/' + newfilename,
         'enhanced_and_compressed': HOSTNAME + '/photos/enhanced_and_compressed/' + newfilename,
@@ -84,6 +85,9 @@ def create_edited_photos(filepath, quality=90):
 @app.route('/upload', methods=['POST'])
 def upload():
     if request.method == 'POST':
+        event = request.form.get('event')
+        if not event:
+            return jsonify({'status': 'error', 'message': 'No event provided'})
         for file in request.files:
             file = request.files[file]
         if not file:
@@ -94,7 +98,7 @@ def upload():
             filename = secure_filename(file.filename)
             file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
             create_edited_photos(os.path.join(
-                app.config['UPLOAD_FOLDER'], filename))
+                app.config['UPLOAD_FOLDER'], filename), event)
             os.remove(os.path.join(app.config['UPLOAD_FOLDER'], filename))
             return jsonify({'status': 'success', 'message': 'File successfully uploaded'})
         else:
